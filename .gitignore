@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Local data / artifacts. Root-anchored: `models/` unanchored would swallow
+# src/parallax/db/models/.
+/data/
+/volumes/
+/models/
+*.db
+*.sqlite3
+*.ckpt
+*.safetensors
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Claude Code
+.claude/settings.local.json
