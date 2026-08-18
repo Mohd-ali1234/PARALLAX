@@ -120,6 +120,28 @@ services:
       redis:
         condition: service_healthy
 
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/frontend/Dockerfile
+      target: ${FRONTEND_BUILD_TARGET:-dev}
+    container_name: parallax-frontend
+    restart: unless-stopped
+    environment:
+      # In the dev target the Vite proxy talks to the API over the compose network.
+      VITE_API_PROXY_TARGET: http://api:8000
+      VITE_USE_POLLING: "${VITE_USE_POLLING:-true}"
+    ports:
+      - "${FRONTEND_PORT:-5173}:5173"
+    volumes:
+      - ./frontend/src:/app/src
+      - ./frontend/index.html:/app/index.html
+      - ./frontend/vite.config.ts:/app/vite.config.ts
+      # Keep the image's node_modules; the host has none inside the container.
+      - /app/node_modules
+    depends_on:
+      - api
+
 volumes:
   postgres_data:
   redis_data:

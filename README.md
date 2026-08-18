@@ -63,6 +63,7 @@ reproducible.
 | Layer | Choice |
 |---|---|
 | API | FastAPI, Uvicorn, Pydantic v2 |
+| Web client | React 19, TypeScript, Vite, TanStack Query |
 | Database | PostgreSQL 16 + pgvector, SQLAlchemy 2.0 (async), Alembic |
 | Vector search | Qdrant (pgvector available as a fallback) |
 | Cache / queue | Redis 7 |
@@ -92,6 +93,7 @@ created on first boot.
 
 | Service | URL |
 |---|---|
+| Web app | http://localhost:5173 |
 | API docs | http://localhost:8000/docs |
 | Liveness | http://localhost:8000/api/v1/health/live |
 | Readiness (checks Postgres) | http://localhost:8000/api/v1/health/ready |
@@ -122,6 +124,46 @@ uvicorn parallax.main:app --reload
 
 Use Python **3.12** — the `ml` extras (torch, docling, whisper) do not have
 complete 3.13 wheels yet.
+
+---
+
+## Frontend
+
+React 19 + TypeScript on Vite, in [`frontend/`](frontend/). It currently renders
+the service-readiness pill and the document registry — enough to prove the
+browser, API, and database are genuinely connected. The agent and evidence views
+come later.
+
+```bash
+cd frontend
+npm ci
+npm run dev          # http://localhost:5173
+```
+
+**The browser never makes a cross-origin request.** In dev, Vite proxies `/api`
+to FastAPI; in the production image, nginx does the same to the `api` service.
+So `VITE_API_BASE_URL` is empty by default and the backend's CORS list only
+matters if you deliberately run the frontend against a different host.
+
+| Command | Effect |
+|---|---|
+| `npm run dev` | Dev server with HMR, proxying `/api` |
+| `npm run build` | Typecheck then production bundle to `dist/` |
+| `npm run typecheck` | `tsc -b --noEmit` |
+| `npm run lint` | ESLint 9 flat config, type-aware rules |
+| `npm run gen:api` | Regenerate types from the running API's OpenAPI doc |
+
+### Keeping types honest
+
+[`src/api/types.ts`](frontend/src/api/types.ts) is written by hand to mirror the
+Pydantic schemas, so the app type-checks with no backend running. That means it
+can drift. When you change a schema, run `make openapi` against a live API to
+regenerate from the source of truth.
+
+[`src/api/client.ts`](frontend/src/api/client.ts) unwraps both error shapes the
+backend can produce: the `{"error": {code, message, details}}` envelope from
+`register_exception_handlers`, and FastAPI's own `{"detail": [...]}` for 422s.
+Both surface as a typed `ApiError` with `.status` and `.code`.
 
 ---
 
@@ -166,7 +208,12 @@ read from settings. Changing the embedding model means a new migration.
 alembic/                  migration environment and versions
 docker/
   api/Dockerfile          multi-stage build (builder → runtime → dev)
+  frontend/Dockerfile     node build → nginx runtime, plus a Vite dev target
+  frontend/nginx.conf     SPA fallback + /api proxy to the api service
   postgres/init/          extensions created on first volume init
+frontend/
+  src/api/                fetch client, typed schemas, TanStack Query hooks
+  src/components/         ServiceStatus, DocumentTable
 src/parallax/
   main.py                 app factory + ASGI entrypoint
   core/                   settings, logging, domain exceptions

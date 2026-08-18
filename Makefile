@@ -63,3 +63,32 @@ fmt: ## Auto-format and fix
 .PHONY: dev
 dev: ## Run the API on the host (needs local Postgres or `make up` for deps)
 	uvicorn parallax.main:app --reload --host 127.0.0.1 --port 8000
+
+# --- frontend ---------------------------------------------------------------
+
+.PHONY: web-install
+web-install: ## Install frontend dependencies
+	cd frontend && npm ci
+
+.PHONY: web-dev
+web-dev: ## Run the Vite dev server on the host (proxies /api to :8000)
+	cd frontend && npm run dev
+
+.PHONY: web-build
+web-build: ## Production build of the frontend
+	cd frontend && npm run build
+
+.PHONY: web-lint
+web-lint: ## Typecheck, lint, and format-check the frontend
+	cd frontend && npm run typecheck && npm run lint && npm run format:check
+
+.PHONY: web-logs
+web-logs: ## Tail frontend logs
+	$(COMPOSE) logs -f frontend
+
+.PHONY: openapi
+openapi: ## Regenerate frontend types from the running API's OpenAPI document
+	cd frontend && npm run gen:api
+
+.PHONY: check
+check: lint web-lint ## Lint both sides

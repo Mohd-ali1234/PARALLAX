@@ -28,7 +28,11 @@ class Settings(BaseSettings):
     # --- API --------------------------------------------------------------
     api_host: str = "0.0.0.0"
     api_port: int = 8000
-    cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:3000"])
+    # Vite dev server. Both the dev proxy and the nginx image serve the app
+    # same-origin, so CORS only matters when the frontend is run standalone.
+    cors_origins: list[str] = Field(
+        default_factory=lambda: ["http://localhost:5173", "http://127.0.0.1:5173"]
+    )
 
     # --- PostgreSQL -------------------------------------------------------
     postgres_host: str = "localhost"

@@ -65,8 +65,27 @@ jobs:
           alembic upgrade head
       - run: pytest --cov=parallax --cov-report=term-missing
 
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run format:check
+      - run: npm run build
+
   docker:
-    name: Docker build
+    name: Docker images
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -79,5 +98,15 @@ jobs:
           push: false
           load: true
           tags: parallax-api:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/frontend/Dockerfile
+          target: runtime
+          push: false
+          load: true
+          tags: parallax-frontend:ci
           cache-from: type=gha
           cache-to: type=gha,mode=max
