@@ -16,7 +16,8 @@ htmlcov
 .env
 .env.*
 !.env.example
-README.md
+# NOT README.md: pyproject declares `readme = "README.md"`, so the hatchling
+# build in docker/api/Dockerfile fails without it in the context.
 docs
 
 # Frontend build inputs are copied explicitly by docker/frontend/Dockerfile.
