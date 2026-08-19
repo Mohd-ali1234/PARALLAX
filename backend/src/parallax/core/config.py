@@ -68,8 +68,18 @@ class Settings(BaseSettings):
     embedding_model: str = "BAAI/bge-m3"
     embedding_dim: int = 1024
     reranker_model: str = "BAAI/bge-reranker-v2-m3"
-    llm_provider: Literal["anthropic", "openai", "qwen"] = "anthropic"
-    llm_model: str = "claude-sonnet-5"
+    # --- LLM ---------------------------------------------------------------
+    # Any OpenAI-compatible server: Ollama (/v1), LM Studio, llama.cpp, vLLM.
+    # Default is Ollama's address; the model must support tool calling.
+    llm_base_url: str = "http://localhost:11434/v1"
+    llm_model: str = "qwen2.5:7b"
+    llm_api_key: str = "not-needed"  # local servers ignore it, but want the header
+    llm_temperature: float = 0.0
+    llm_timeout_s: float = 120.0
+
+    # Hard ceiling on tool-calling rounds per question, so a model that keeps
+    # calling tools cannot loop forever.
+    agent_max_iterations: int = 5
 
     @computed_field  # type: ignore[prop-decorator]
     @property

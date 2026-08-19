@@ -72,8 +72,8 @@ reproducible.
 | Speech | Whisper |
 | Embeddings | BGE-M3 (1024-d) |
 | Reranking | BGE-Reranker-v2-m3 |
-| Agents | LangGraph |
-| LLM | Claude (default), GPT, Qwen |
+| Agents | hand-rolled tool loop today; LangGraph for the supervisor graph |
+| LLM | any OpenAI-compatible server (Ollama, LM Studio, llama.cpp, vLLM) |
 | Tracing | Langfuse |
 | Runtime | Docker Compose |
 
@@ -171,6 +171,88 @@ Both surface as a typed `ApiError` with `.status` and `.code`.
 
 ---
 
+## AI agent
+
+A small tool-calling agent lives in [`backend/src/parallax/ai/`](backend/src/parallax/ai/).
+Ask it a question, it calls tools against the document registry, and answers
+from what they returned.
+
+```bash
+curl -s localhost:8000/api/v1/agent/tools          # what it can call
+curl -s -X POST localhost:8000/api/v1/agent/ask   -H 'Content-Type: application/json'   -d '{"question": "how many earnings calls are ingested?"}'
+```
+
+The response carries the tool calls that produced it — PARALLAX shows its work:
+
+```json
+{
+  "answer": "There is 1 earnings call ingested.",
+  "steps": [{"tool": "count_documents", "arguments": "{\"source_type\":\"earnings_call\"}",
+             "result": "1 document(s) of type earnings_call."}],
+  "iterations": 2, "stop_reason": "final_answer", "model": "qwen2.5:7b"
+}
+```
+
+### Pointing it at a local model
+
+The client speaks the **OpenAI-compatible** `/v1/chat/completions` API, so the
+runtime is a config value, not a code change:
+
+| Runtime | `PARALLAX_LLM_BASE_URL` |
+|---|---|
+| Ollama (default) | `http://localhost:11434/v1` |
+| LM Studio | `http://localhost:1234/v1` |
+| llama.cpp server | `http://localhost:8080/v1` |
+| vLLM | `http://localhost:8000/v1` |
+
+```bash
+ollama serve
+ollama pull qwen2.5:7b        # must support tool calling
+```
+
+**The model must support tool calling.** A model without it will answer from the
+prompt alone and silently ignore the tools — which for a verification engine is
+the worst failure mode there is, because it looks like an answer. `qwen2.5`,
+`llama3.1`, and `mistral-nemo` all support it; many small chat-tuned models do not.
+
+From inside Docker, `localhost` is the container. Use
+`PARALLAX_LLM_BASE_URL=http://host.docker.internal:11434/v1` to reach a model
+server on the host.
+
+If the server is not running, `/agent/ask` returns a `503` naming the URL it
+tried, rather than hanging.
+
+### How it works
+
+Four small pieces, no agent framework:
+
+- [`llm.py`](backend/src/parallax/ai/llm.py) — one `chat()` method over httpx.
+- [`tools.py`](backend/src/parallax/ai/tools.py) — a registry mapping names to
+  async functions plus their JSON schema. Schemas are hand-written, because for
+  tool calling the description *is* the interface.
+- [`builtin_tools.py`](backend/src/parallax/ai/builtin_tools.py) — three
+  read-only tools over the `documents` table.
+- [`agent.py`](backend/src/parallax/ai/agent.py) — the loop: ask, run any
+  requested tools, feed results back, repeat until the model answers or
+  `PARALLAX_AGENT_MAX_ITERATIONS` is hit.
+
+Two decisions worth knowing:
+
+**Model mistakes are fed back, infrastructure failures are raised.** An unknown
+tool name, malformed JSON arguments, or wrong parameters come back to the model
+as an observation it can correct — aborting the run would throw away an answer
+it could still reach. A database outage propagates as a 5xx, because retrying
+will not help.
+
+**The tools are read-only.** An agent that can mutate ingestion state is a much
+larger conversation about authorization than this scaffold should settle.
+
+It is hand-rolled rather than LangGraph on purpose: the loop is ~40 lines and
+adds no dependency. LangGraph earns its place when the supervisor/critic graph
+from the architecture lands — it does not yet.
+
+---
+
 ## Data model
 
 Four tables carry the ingestion output. Everything downstream reads from them.
@@ -217,9 +299,10 @@ backend/                  the FastAPI service
   alembic/                migration environment and versions
   src/parallax/
     main.py               app factory + ASGI entrypoint
+    ai/                   LLM client, tool registry, agent loop
     core/                 settings, logging, domain exceptions
     db/                   declarative base, async session, models
-    api/v1/routes/        health, documents
+    api/v1/routes/        health, documents, agent
     schemas/              Pydantic request/response models
   tests/                  DB-backed tests skip when Postgres is absent
 
