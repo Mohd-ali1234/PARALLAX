@@ -25,7 +25,7 @@ npm-debug.log*
 !.env.example
 
 # Local data / artifacts. Root-anchored: `models/` unanchored would swallow
-# src/parallax/db/models/.
+# backend/src/parallax/db/models/.
 /data/
 /volumes/
 /models/

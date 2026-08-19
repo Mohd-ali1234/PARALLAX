@@ -18,8 +18,8 @@ RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
 WORKDIR /build
-COPY pyproject.toml README.md ./
-COPY src ./src
+COPY backend/pyproject.toml backend/README.md ./
+COPY backend/src ./src
 RUN pip install --upgrade pip setuptools wheel && pip install .
 
 
@@ -38,9 +38,9 @@ RUN apt-get update \
 COPY --from=builder /opt/venv /opt/venv
 
 WORKDIR /app
-COPY --chown=parallax:parallax alembic.ini ./
-COPY --chown=parallax:parallax alembic ./alembic
-COPY --chown=parallax:parallax src ./src
+COPY --chown=parallax:parallax backend/alembic.ini ./
+COPY --chown=parallax:parallax backend/alembic ./alembic
+COPY --chown=parallax:parallax backend/src ./src
 COPY --chown=parallax:parallax docker/api/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
@@ -59,7 +59,7 @@ CMD ["uvicorn", "parallax.main:app", "--host", "0.0.0.0", "--port", "8000"]
 FROM runtime AS dev
 
 USER root
-COPY --chown=parallax:parallax pyproject.toml README.md /app/
+COPY --chown=parallax:parallax backend/pyproject.toml backend/README.md /app/
 RUN pip install --no-cache-dir -e "/app[dev]"
 USER parallax
 CMD ["uvicorn", "parallax.main:app", "--host", "0.0.0.0", "--port", "8000", \

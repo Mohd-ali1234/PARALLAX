@@ -112,8 +112,8 @@ services:
       - "${PARALLAX_API_PORT:-8000}:8000"
     volumes:
       # Live reload in the dev target; harmless in prod builds that don't watch.
-      - ./src:/app/src
-      - ./alembic:/app/alembic
+      - ./backend/src:/app/src
+      - ./backend/alembic:/app/alembic
     depends_on:
       postgres:
         condition: service_healthy

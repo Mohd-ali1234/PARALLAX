@@ -50,19 +50,23 @@ test: ## Run the test suite in the API container
 	$(COMPOSE) exec api pytest
 
 .PHONY: lint
-lint: ## Lint and type-check
-	ruff check src tests
-	ruff format --check src tests
-	mypy
+lint: ## Lint and type-check the backend
+	cd backend && ruff check src tests
+	cd backend && ruff format --check src tests
+	cd backend && mypy
 
 .PHONY: fmt
-fmt: ## Auto-format and fix
-	ruff format src tests
-	ruff check --fix src tests
+fmt: ## Auto-format and fix the backend
+	cd backend && ruff format src tests
+	cd backend && ruff check --fix src tests
 
 .PHONY: dev
 dev: ## Run the API on the host (needs local Postgres or `make up` for deps)
-	uvicorn parallax.main:app --reload --host 127.0.0.1 --port 8000
+	cd backend && uvicorn parallax.main:app --reload --host 127.0.0.1 --port 8000
+
+.PHONY: install
+install: ## Editable install of the backend with dev extras
+	pip install -e "./backend[dev]"
 
 # --- frontend ---------------------------------------------------------------
 

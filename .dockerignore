@@ -9,15 +9,15 @@ __pycache__
 .pytest_cache
 .coverage
 htmlcov
-# Root-anchored: bare `models` would also strip src/parallax/db/models/.
+# Root-anchored: bare `models` would also strip backend/src/parallax/db/models/.
 /data
 /volumes
 /models
 .env
 .env.*
 !.env.example
-# NOT README.md: pyproject declares `readme = "README.md"`, so the hatchling
-# build in docker/api/Dockerfile fails without it in the context.
+# Note: backend/README.md must stay in the context - backend/pyproject.toml
+# declares `readme`, and the hatchling build fails without it.
 docs
 
 # Frontend build inputs are copied explicitly by docker/frontend/Dockerfile.

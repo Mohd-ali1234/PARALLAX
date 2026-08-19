@@ -3,16 +3,24 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal
 
 from pydantic import Field, PostgresDsn, computed_field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# config.py -> core -> parallax -> src -> backend -> repo root
+_REPO_ROOT = Path(__file__).resolve().parents[4]
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="PARALLAX_",
-        env_file=".env",
+        # The one .env lives at the repo root, shared with docker compose - but
+        # backend commands run from backend/, and env_file is CWD-relative. Give
+        # both paths; later entries win, so a local .env still overrides. Missing
+        # files are ignored, which is what happens inside the container.
+        env_file=(_REPO_ROOT / ".env", ".env"),
         env_file_encoding="utf-8",
         extra="ignore",
         case_sensitive=False,

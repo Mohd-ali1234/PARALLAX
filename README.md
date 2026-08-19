@@ -108,7 +108,9 @@ curl -s localhost:8000/api/v1/health/ready
 ```
 
 `make help` lists the shortcuts (`up`, `down`, `logs`, `psql`, `migrate`,
-`test`, `lint`, `nuke`).
+`test`, `lint`, `nuke`). The Makefile is a convenience only — `make` is not
+installed by default on Windows, and every target is a one-line `docker compose`
+or `cd backend && ...` command you can run directly.
 
 ### Running the API without Docker
 
@@ -117,7 +119,9 @@ You still need a Postgres with the `vector` extension. Point `.env` at it
 
 ```bash
 python -m venv .venv && .venv/Scripts/activate   # PowerShell: .venv\Scripts\Activate.ps1
-pip install -e ".[dev]"
+pip install -e "./backend[dev]"
+
+cd backend            # alembic.ini and pyproject.toml live here
 alembic upgrade head
 uvicorn parallax.main:app --reload
 ```
@@ -204,34 +208,51 @@ read from settings. Changing the embedding model means a new migration.
 
 ## Layout
 
+Backend and frontend are siblings; everything that runs the stack sits at the root.
+
 ```
-alembic/                  migration environment and versions
+backend/                  the FastAPI service
+  pyproject.toml          deps, ruff/mypy/pytest config
+  alembic.ini
+  alembic/                migration environment and versions
+  src/parallax/
+    main.py               app factory + ASGI entrypoint
+    core/                 settings, logging, domain exceptions
+    db/                   declarative base, async session, models
+    api/v1/routes/        health, documents
+    schemas/              Pydantic request/response models
+  tests/                  DB-backed tests skip when Postgres is absent
+
+frontend/                 the React client
+  src/api/                fetch client, typed schemas, TanStack Query hooks
+  src/components/         ServiceStatus, DocumentTable
+  vite.config.ts          dev server + /api proxy
+
 docker/
   api/Dockerfile          multi-stage build (builder → runtime → dev)
   frontend/Dockerfile     node build → nginx runtime, plus a Vite dev target
   frontend/nginx.conf     SPA fallback + /api proxy to the api service
   postgres/init/          extensions created on first volume init
-frontend/
-  src/api/                fetch client, typed schemas, TanStack Query hooks
-  src/components/         ServiceStatus, DocumentTable
-src/parallax/
-  main.py                 app factory + ASGI entrypoint
-  core/                   settings, logging, domain exceptions
-  db/                     declarative base, async session, models
-  api/v1/routes/          health, documents
-  schemas/                Pydantic request/response models
-tests/                    DB-backed tests skip when Postgres is absent
+
+docker-compose.yml        the whole stack
+Makefile                  shortcuts; backend targets cd into backend/ for you
 ```
+
+Python tooling is configured once in `backend/pyproject.toml`, and every path in
+it is relative to that file — so `ruff`, `mypy`, `pytest`, and `alembic` must be
+run from `backend/`. The Makefile targets handle that; `make lint`, `make fmt`,
+and `make dev` still work from the repo root.
+
 
 ## Configuration
 
 All settings come from the environment with the `PARALLAX_` prefix and are
-declared once in [`core/config.py`](src/parallax/core/config.py). `.env.example`
+declared once in [`core/config.py`](backend/src/parallax/core/config.py). `.env.example`
 is the full list. Secrets are never committed; `.env` is gitignored.
 
 ## Tests
 
 ```bash
-pytest                # DB-backed tests skip without Postgres
+cd backend && pytest  # DB-backed tests skip without Postgres
 make test             # runs inside the API container, DB present
 ```
