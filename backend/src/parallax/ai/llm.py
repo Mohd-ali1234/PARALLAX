@@ -7,6 +7,8 @@ is specific to a vendor beyond the URL.
 
 from __future__ import annotations
 
+import json
+import re
 from typing import Any
 
 import httpx
@@ -54,6 +56,56 @@ class AssistantMessage(BaseModel):
         if self.tool_calls:
             msg["tool_calls"] = [tc.model_dump() for tc in self.tool_calls]
         return msg
+
+
+# Some local models (qwen2.5-coder among them) announce tool support but write
+# the call into `content` as plain JSON instead of filling `tool_calls`. Ollama
+# passes that straight through, so we recover it ourselves.
+_FENCE = re.compile(r"^\s*```(?:json)?\s*(.*?)\s*```\s*$", re.DOTALL)
+
+
+def _recover_text_tool_calls(content: str | None, known_tools: set[str]) -> list[ToolCall]:
+    """Pull a tool call out of plain-text content.
+
+    Only ever converts when the name matches a tool we actually offered, so a
+    genuine answer that happens to be JSON is never mistaken for a call.
+    """
+    if not content or not known_tools:
+        return []
+
+    text = content.strip()
+    fenced = _FENCE.match(text)
+    if fenced:
+        text = fenced.group(1).strip()
+    if not text.startswith(("{", "[")):
+        return []
+
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        return []
+
+    candidates = parsed if isinstance(parsed, list) else [parsed]
+    calls: list[ToolCall] = []
+    for index, candidate in enumerate(candidates):
+        if not isinstance(candidate, dict):
+            continue
+        # Accept both {"name": ...} and {"function": {"name": ...}}.
+        inner = candidate.get("function")
+        spec = inner if isinstance(inner, dict) else candidate
+
+        name = spec.get("name")
+        if not isinstance(name, str) or name not in known_tools:
+            continue
+
+        arguments = spec.get("arguments", {})
+        if not isinstance(arguments, str):
+            arguments = json.dumps(arguments if arguments is not None else {})
+
+        calls.append(
+            ToolCall(id=f"call_{index}", function=ToolCallFunction(name=name, arguments=arguments))
+        )
+    return calls
 
 
 class LLMClient:
@@ -116,10 +168,11 @@ class LLMClient:
                 details={"body": response.text[:500], "model": self.model},
             )
 
-        return self._parse(response.json())
+        known = {t["function"]["name"] for t in tools or [] if "function" in t}
+        return self._parse(response.json(), known)
 
     @staticmethod
-    def _parse(body: dict[str, Any]) -> AssistantMessage:
+    def _parse(body: dict[str, Any], known_tools: set[str] | None = None) -> AssistantMessage:
         choices = body.get("choices")
         if not choices:
             raise LLMError("Model response contained no choices", details={"body": body})
@@ -132,4 +185,17 @@ class LLMClient:
         if message.get("tool_calls") is None:
             message = {**message, "tool_calls": []}
 
-        return AssistantMessage.model_validate(message)
+        parsed = AssistantMessage.model_validate(message)
+
+        if not parsed.tool_calls:
+            recovered = _recover_text_tool_calls(parsed.content, known_tools or set())
+            if recovered:
+                log.info(
+                    "recovered_text_tool_calls",
+                    count=len(recovered),
+                    tools=[c.function.name for c in recovered],
+                )
+                parsed.tool_calls = recovered
+                parsed.content = None
+
+        return parsed

@@ -1,0 +1,407 @@
+===============================================================================
+ PARALLAX - THE AI AGENT, EXPLAINED SIMPLY
+ Written 19 August 2026
+===============================================================================
+
+This file explains, in plain language, the AI work that was added to PARALLAX
+today. No prior AI knowledge assumed.
+
+
+-------------------------------------------------------------------------------
+1. WHAT WE BUILT, IN ONE SENTENCE
+-------------------------------------------------------------------------------
+
+We gave PARALLAX a small assistant you can ask questions like "how many
+documents do we have?", and instead of guessing, it looks up the real answer
+in the database and shows you where it got it.
+
+
+-------------------------------------------------------------------------------
+2. WHAT IS AN "AGENT"? (the important idea)
+-------------------------------------------------------------------------------
+
+A normal AI chatbot only knows what it learned during training. If you ask it
+"how many documents are in MY database?", it cannot know. It will either say
+"I do not know", or - much worse - invent a number that looks believable.
+
+An AGENT is an AI that has been given a set of buttons it can press.
+
+We call those buttons TOOLS. A tool is just a small piece of ordinary Python
+code, for example "go and count the rows in the documents table".
+
+So the conversation goes like this:
+
+    You     : "How many earnings calls do we have?"
+    AI      : "I cannot know that myself. Please press the button
+               count_documents with source_type = earnings_call."
+    Our code: (presses the button, runs the database query)
+              "1 document(s) of type earnings_call."
+    AI      : "There is 1 earnings call ingested."
+
+The AI never touches the database itself. It only ASKS for a tool to be run.
+Our Python code decides whether to run it, runs it, and hands back the result.
+That is the whole trick. Everything else is plumbing.
+
+This matters especially for PARALLAX, because PARALLAX is a verification
+engine. A tool that invents numbers would be worse than no tool at all.
+
+
+-------------------------------------------------------------------------------
+3. WHICH AI MODEL DOES IT USE?
+-------------------------------------------------------------------------------
+
+You said you want a LOCAL model - one running on your own computer, not a paid
+service on the internet. That is a good choice: free, private, works offline.
+
+Several programs can run models locally:
+
+    Ollama      - the most popular, easiest to start with
+    LM Studio   - has a friendly window/interface
+    llama.cpp   - the low-level engine many others are built on
+    vLLM        - built for speed on large graphics cards
+
+Here is the useful fact: ALL OF THEM speak the same "language" over the
+network. The format was originally made by OpenAI, everyone copied it, and it
+became the standard.
+
+So we wrote our code against that shared format, not against Ollama
+specifically.
+
+WHY THAT MATTERS: if you start with Ollama and later switch to LM Studio, you
+rewrite NO code. You change one line in your settings file - the web address.
+
+    Ollama      PARALLAX_LLM_BASE_URL=http://localhost:11434/v1
+    LM Studio   PARALLAX_LLM_BASE_URL=http://localhost:1234/v1
+    llama.cpp   PARALLAX_LLM_BASE_URL=http://localhost:8080/v1
+    vLLM        PARALLAX_LLM_BASE_URL=http://localhost:8000/v1
+
+By default it points at Ollama.
+
+
+-------------------------------------------------------------------------------
+4. *** THE MOST IMPORTANT WARNING IN THIS FILE ***
+-------------------------------------------------------------------------------
+
+NOT EVERY MODEL CAN PRESS BUTTONS.
+
+"Tool calling" is a specific skill a model must be trained for. Many smaller
+chat models simply do not have it.
+
+Here is the dangerous part. A model without that skill will NOT show an error.
+It will quietly ignore the tools and answer from imagination. You get a
+confident, well-written, completely invented answer, and nothing looks broken.
+
+For a financial verification tool, that is the worst possible failure.
+
+Models that DO support tool calling and work well:
+
+    qwen2.5        (our default)
+    llama3.1
+    mistral-nemo
+
+If an answer looks right but the "steps" list in the response is empty, that
+is your clue the model is not really using the tools.
+
+UPDATE - WHAT WE ACTUALLY FOUND ON YOUR MACHINE
+
+We tested your model, qwen2.5-coder:7b, and hit a middle case we did not
+expect.
+
+Ollama reports that the model supports tools. And the model does understand
+what to do - when asked "how many earnings calls do we have?", it correctly
+worked out it should use count_documents with source_type = earnings_call.
+
+But it writes that decision as ordinary TEXT instead of putting it in the
+proper "tool_calls" slot. Our code saw no proper tool request, so it handed
+that text back to you as the answer. You got this:
+
+    answer : {"name": "count_documents", "arguments": {}}
+    steps  : []
+
+which is exactly the "empty steps" symptom described above.
+
+THE FIX: our code now also reads tool requests written as plain text and
+converts them into real ones. It only does this when the name matches a tool
+we genuinely offered, so a normal answer that happens to look like JSON is
+never mistaken for a button press.
+
+Verified working with qwen2.5-coder:7b on 19 August 2026.
+
+
+-------------------------------------------------------------------------------
+5. THE FILES WE ADDED
+-------------------------------------------------------------------------------
+
+Everything lives in:  backend/src/parallax/ai/
+
+Four small files. Deliberately small.
+
+  llm.py
+      Talks to the model over the network. Sends the question, gets the reply.
+      That is its only job.
+
+  tools.py
+      The list of available buttons. Holds each tool name, a description for
+      the AI to read, and the Python function to run.
+
+  builtin_tools.py
+      The actual three buttons (see the next section).
+
+  agent.py
+      The loop that ties it together: ask the model, run whatever tools it
+      requested, give it the results, ask again, until it produces a real
+      answer. Only about 40 lines.
+
+Plus two supporting files:
+
+  api/v1/routes/agent.py   the web address you call
+  schemas/agent.py         the shape of the request and the response
+
+A CHOICE WORTH EXPLAINING:
+We wrote the loop by hand instead of using a big framework called LangGraph,
+even though LangGraph is in the project's planned technology list. Reason: the
+loop is 40 lines and needs no extra library. LangGraph is genuinely useful for
+the large multi-agent system planned later - Supervisor, Filing Agent, Critic
+and so on. It is not useful yet, and adding it now would be weight with no
+benefit. Nothing stops us swapping it in later.
+
+
+-------------------------------------------------------------------------------
+6. THE THREE TOOLS IT CAN USE TODAY
+-------------------------------------------------------------------------------
+
+  count_documents
+      Counts documents, optionally filtered by type.
+      Answers "how many..." questions.
+
+  list_documents
+      Lists documents with title, type, financial period and status.
+      Answers "what do we have..." questions.
+
+  ingestion_status
+      Shows how many documents are pending / parsing / finished / failed.
+      Answers "is processing done?" or "is anything stuck?".
+
+ALL THREE ONLY READ DATA. None of them can change, add or delete anything.
+
+That was a deliberate decision, not laziness. The moment an AI can modify your
+data you must answer hard questions: who is allowed to trigger it, what
+happens when the model misunderstands, how do you undo it. Those deserve a
+proper design, not a quick guess. So for now: read only.
+
+
+-------------------------------------------------------------------------------
+7. HOW YOU USE IT
+-------------------------------------------------------------------------------
+
+Two web addresses.
+
+(a) See what the agent can do:
+
+    GET  http://localhost:8000/api/v1/agent/tools
+
+    Returns which model is configured and the list of tools. Useful for
+    checking your setup before blaming the AI.
+
+(b) Ask a question:
+
+    POST http://localhost:8000/api/v1/agent/ask
+    Body: {"question": "how many earnings calls are ingested?"}
+
+    You get back something like:
+
+    {
+      "answer": "There is 1 earnings call ingested.",
+      "steps": [
+        {
+          "tool": "count_documents",
+          "arguments": "{ source_type: earnings_call }",
+          "result": "1 document(s) of type earnings_call."
+        }
+      ],
+      "iterations": 2,
+      "stop_reason": "final_answer",
+      "model": "qwen2.5:7b"
+    }
+
+The "steps" part is the important bit. It shows exactly which buttons were
+pressed and what came back, so you can check the answer instead of trusting
+it. PARALLAX shows its work on purpose - that is the point of the project.
+
+
+-------------------------------------------------------------------------------
+8. TWO DESIGN RULES WORTH KNOWING
+-------------------------------------------------------------------------------
+
+RULE 1: Mistakes the AI can fix are handed back to it. Real breakages are not.
+
+    If the AI asks for a tool that does not exist, or sends nonsense
+    arguments, we do NOT crash. We reply to it, politely:
+
+        "There is no tool named 'xyz'. Available tools are: ..."
+
+    and let it try again. Models are usually able to correct themselves, and
+    giving up would throw away an answer it could still reach.
+
+    BUT if the database is down, we stop immediately and report an error.
+    Letting the AI try again would be pointless - the database is still down.
+
+    Short version: problems it can fix, we tell it about. Problems it cannot
+    fix, we stop for.
+
+RULE 2: There is a hard limit on how many rounds it gets.
+
+    Default is 5. Without a limit, a confused model could keep requesting
+    tools forever - burning time, and on a paid service, money. After 5 rounds
+    we stop and return whatever we have.
+
+
+-------------------------------------------------------------------------------
+9. WHAT HAPPENS IF THE MODEL IS NOT RUNNING
+-------------------------------------------------------------------------------
+
+You get a clear error straight away, not a hang:
+
+    HTTP 503
+    "Local LLM at http://localhost:11434/v1 is not reachable.
+     Is the model server running?"
+
+It names the exact address it tried, so you can tell whether you pointed it at
+the wrong port. This was tested - it is the situation on your machine today,
+because no local model is installed yet.
+
+
+-------------------------------------------------------------------------------
+10. A REAL BUG WE FOUND AND FIXED (worth understanding)
+-------------------------------------------------------------------------------
+
+The automated tests caught a genuine bug in the first version of the agent. It
+is a good example of why the tests exist, so here it is in plain terms.
+
+The document types (sec_filing, investor_deck, earnings_call, xbrl) are stored
+in Python as a special kind of value that ALSO counts as ordinary text.
+
+Our code had a check that meant:
+
+    "if the result is text, then it must be an error message"
+
+But because those type values also count as text, EVERY CORRECT ANSWER looked
+like an error message to that check. So asking "how many XBRL documents?"
+answered with the word "xbrl" instead of a number. Broken for all four types -
+not a rare edge case.
+
+Why did it slip through? The tests covering it needed a running PostgreSQL
+database. Your computer does not have one, so those tests were skipped
+locally. They only ran on GitHub, where a database is provided - and that is
+exactly where the failure showed up.
+
+The fix: stop mixing "the answer" and "the error" into one value. They are now
+returned separately, so they can never be confused again.
+
+We also added new tests that need NO database, including one that checks all
+four document types. Those run on your machine too, so this kind of mistake
+now fails immediately instead of waiting for GitHub.
+
+
+-------------------------------------------------------------------------------
+11. WHAT WAS TESTED, AND WHAT WAS NOT
+-------------------------------------------------------------------------------
+
+TESTED AND WORKING:
+
+  - The loop itself: asks, runs tools, feeds results back, answers.
+  - Recovery from bad tool names and malformed arguments.
+  - The 5-round limit.
+  - The real network code, checked against a fake server, confirming we send
+    exactly the right data and correctly read a tool request back.
+  - A genuine end-to-end run: a temporary fake model server was started, the
+    API was pointed at it, and a full question-and-answer completed.
+  - The "model is not running" error.
+  - The three tools against a real PostgreSQL database (on GitHub).
+
+  40 automated tests, all passing.
+
+NOT TESTED - PLEASE READ:
+
+  - No REAL AI model has ever driven this. Everything above used scripted or
+    fake models. The plumbing is proven. Whether qwen2.5 actually picks the
+    right tool for a real question is genuinely unknown until you run it.
+  - Docker is not installed on your machine, so the complete system (database,
+    API, website, all together) has never actually been started.
+
+
+-------------------------------------------------------------------------------
+12. HOW TO TRY IT YOURSELF
+-------------------------------------------------------------------------------
+
+Step 1 - install and start a local model
+         (install Ollama from ollama.com first):
+
+    ollama serve
+    ollama pull qwen2.5:7b
+
+Step 2 - start the database, so the tools have something to report
+         (needs Docker Desktop, which is not yet on your machine):
+
+    docker compose up -d postgres
+
+Step 3 - start PARALLAX:
+
+    cd backend
+    uvicorn parallax.main:app --reload
+
+Step 4 - check the setup before asking anything:
+
+    open http://localhost:8000/api/v1/agent/tools in a browser
+
+Step 5 - ask a question.
+
+    The easiest way is to open:
+
+        http://localhost:8000/docs
+
+    That page is generated automatically from the code. Find the
+    /api/v1/agent/ask entry, click "Try it out", type your question, and press
+    Execute. Much easier than typing curl commands by hand.
+
+
+-------------------------------------------------------------------------------
+13. SETTINGS YOU CAN CHANGE
+-------------------------------------------------------------------------------
+
+All of these live in the .env file at the top of the project.
+
+    PARALLAX_LLM_BASE_URL          where your model is running
+    PARALLAX_LLM_MODEL             which model to use
+    PARALLAX_LLM_TEMPERATURE       0.0 = consistent and repeatable,
+                                   higher = more creative.
+                                   Keep 0.0 for a verification tool.
+    PARALLAX_LLM_TIMEOUT_S         how long to wait for a reply. Local models
+                                   on a CPU are slow, so this is 120 seconds.
+    PARALLAX_AGENT_MAX_ITERATIONS  the round limit from section 8.
+
+ONE TRAP: if you run PARALLAX inside Docker, the word "localhost" means
+"inside this container", not "my computer". Your model will not be found. Use
+this instead:
+
+    PARALLAX_LLM_BASE_URL=http://host.docker.internal:11434/v1
+
+
+-------------------------------------------------------------------------------
+14. WHAT COMES NEXT
+-------------------------------------------------------------------------------
+
+This agent is small on purpose. It is a working skeleton proving the pieces
+connect: browser -> API -> AI model -> tools -> database -> answer.
+
+The full PARALLAX design has much more: separate agents for filings, slide
+decks, audio and XBRL data, a reconciliation engine that compares their
+numbers, and a critic agent that double-checks conclusions.
+
+The sensible next step is NOT more AI. It is INGESTION - the code that
+actually reads PDFs, slide decks and audio recordings and fills the database.
+Right now the tables are empty, so the agent can only ever answer "there is
+nothing here". Once real documents are loaded, it will have something worth
+reasoning about.
+
+===============================================================================

@@ -130,3 +130,96 @@ async def test_connection_failure_becomes_503() -> None:
 
     assert exc.value.status_code == 503
     assert "not reachable" in exc.value.message
+
+
+# --- recovering tool calls that a model wrote as plain text -----------------
+#
+# qwen2.5-coder and similar models advertise tool support but put the call in
+# `content` instead of `tool_calls`. Recovery must be eager enough to help and
+# narrow enough never to mangle a real answer.
+
+KNOWN = {"count_documents", "list_documents"}
+
+
+def parse_content(content: str, known: set[str] | None = KNOWN) -> Any:
+    body = {"choices": [{"message": {"role": "assistant", "content": content}}]}
+    return LLMClient._parse(body, known)
+
+
+def test_recovers_a_bare_json_tool_call() -> None:
+    msg = parse_content('{"name": "count_documents", "arguments": {"source_type": "xbrl"}}')
+
+    assert msg.wants_tools
+    assert msg.tool_calls[0].function.name == "count_documents"
+    assert json.loads(msg.tool_calls[0].function.arguments) == {"source_type": "xbrl"}
+    # Content is cleared, or the model would see its own call echoed back as prose.
+    assert msg.content is None
+
+
+def test_recovers_a_fenced_json_tool_call() -> None:
+    msg = parse_content('```json\n{"name": "list_documents", "arguments": {}}\n```')
+    assert msg.tool_calls[0].function.name == "list_documents"
+
+
+def test_recovers_the_nested_function_form() -> None:
+    msg = parse_content('{"function": {"name": "count_documents", "arguments": {}}}')
+    assert msg.tool_calls[0].function.name == "count_documents"
+
+
+def test_recovers_several_calls_from_a_list() -> None:
+    msg = parse_content('[{"name": "count_documents"}, {"name": "list_documents"}]')
+    assert [c.function.name for c in msg.tool_calls] == ["count_documents", "list_documents"]
+    assert len({c.id for c in msg.tool_calls}) == 2  # ids must be distinct
+
+
+def test_missing_arguments_become_an_empty_object() -> None:
+    msg = parse_content('{"name": "count_documents"}')
+    assert msg.tool_calls[0].function.arguments == "{}"
+
+
+def test_ignores_a_name_that_is_not_a_real_tool() -> None:
+    # The safety property: never invent a call for something we did not offer.
+    msg = parse_content('{"name": "delete_everything", "arguments": {}}')
+    assert not msg.wants_tools
+    assert msg.content is not None
+
+
+def test_ignores_prose() -> None:
+    msg = parse_content("There are 4 documents in the registry.")
+    assert not msg.wants_tools
+
+
+def test_ignores_json_that_is_a_genuine_answer() -> None:
+    msg = parse_content('{"total": 4, "by_type": {"xbrl": 1}}')
+    assert not msg.wants_tools
+    assert msg.content is not None
+
+
+def test_no_recovery_when_no_tools_were_offered() -> None:
+    msg = parse_content('{"name": "count_documents", "arguments": {}}', known=set())
+    assert not msg.wants_tools
+
+
+def test_structured_tool_calls_are_left_alone() -> None:
+    body = {
+        "choices": [
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": '{"name": "list_documents"}',
+                    "tool_calls": [
+                        {
+                            "id": "real_1",
+                            "type": "function",
+                            "function": {"name": "count_documents", "arguments": "{}"},
+                        }
+                    ],
+                }
+            }
+        ]
+    }
+    msg = LLMClient._parse(body, KNOWN)
+
+    # A model that fills tool_calls properly must never be second-guessed.
+    assert len(msg.tool_calls) == 1
+    assert msg.tool_calls[0].id == "real_1"

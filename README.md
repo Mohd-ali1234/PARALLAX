@@ -210,10 +210,17 @@ ollama serve
 ollama pull qwen2.5:7b        # must support tool calling
 ```
 
-**The model must support tool calling.** A model without it will answer from the
-prompt alone and silently ignore the tools — which for a verification engine is
-the worst failure mode there is, because it looks like an answer. `qwen2.5`,
-`llama3.1`, and `mistral-nemo` all support it; many small chat-tuned models do not.
+**The model must support tool calling.** A model without it answers from the
+prompt alone and silently ignores the tools — for a verification engine that is
+the worst failure mode there is, because it still looks like an answer. If
+`steps` comes back empty on a question that clearly needs data, that is the tell.
+
+Some models (`qwen2.5-coder` among them) advertise tool support and then write
+the call into the message text instead of the `tool_calls` field. The client
+recovers those: if the text parses as JSON naming a tool we actually offered, it
+is promoted to a real call. Anything else is left alone, so a genuine answer is
+never mistaken for a call. `qwen2.5`, `llama3.1` and `mistral-nemo` need no such
+help.
 
 From inside Docker, `localhost` is the container. Use
 `PARALLAX_LLM_BASE_URL=http://host.docker.internal:11434/v1` to reach a model
