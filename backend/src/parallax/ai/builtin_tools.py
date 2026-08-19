@@ -16,14 +16,25 @@ registry = ToolRegistry()
 _SOURCE_TYPES = [s.value for s in SourceType]
 
 
-def _parse_source_type(value: str | None) -> SourceType | str | None:
-    """Returns the enum, None for "no filter", or an error string for the model."""
-    if value is None or value == "":
-        return None
+def _parse_source_type(value: str | None) -> tuple[SourceType | None, str | None]:
+    """Parse a source_type argument coming from the model.
+
+    Returns (filter, error): `filter` is None for "no filter", `error` is a
+    message to hand back to the model, or None.
+
+    A tuple rather than "the enum or an error string" on purpose - SourceType is
+    a StrEnum, so isinstance(x, str) is true for valid values too and cannot
+    tell a result from an error.
+    """
+    if not value:
+        return None, None
     try:
-        return SourceType(value)
+        return SourceType(value), None
     except ValueError:
-        return f"Error: unknown source_type {value!r}. Valid values: {', '.join(_SOURCE_TYPES)}."
+        return (
+            None,
+            f"Error: unknown source_type {value!r}. Valid values: {', '.join(_SOURCE_TYPES)}.",
+        )
 
 
 @registry.tool(
@@ -44,9 +55,9 @@ def _parse_source_type(value: str | None) -> SourceType | str | None:
     },
 )
 async def count_documents(ctx: ToolContext, source_type: str | None = None) -> str:
-    parsed = _parse_source_type(source_type)
-    if isinstance(parsed, str):
-        return parsed
+    parsed, error = _parse_source_type(source_type)
+    if error is not None:
+        return error
 
     stmt = select(func.count()).select_from(Document)
     if parsed is not None:
@@ -81,9 +92,9 @@ async def count_documents(ctx: ToolContext, source_type: str | None = None) -> s
     },
 )
 async def list_documents(ctx: ToolContext, source_type: str | None = None, limit: int = 10) -> str:
-    parsed = _parse_source_type(source_type)
-    if isinstance(parsed, str):
-        return parsed
+    parsed, error = _parse_source_type(source_type)
+    if error is not None:
+        return error
 
     limit = max(1, min(int(limit), 20))
     stmt = select(Document).order_by(Document.created_at.desc()).limit(limit)
