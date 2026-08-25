@@ -13,26 +13,15 @@ venv/
 .coverage
 htmlcov/
 
-# Node / frontend
-node_modules/
-frontend/dist/
-frontend/.vite/
-npm-debug.log*
-
 # Environment
 .env
 .env.*
 !.env.example
 
-# Local data / artifacts. Root-anchored: `models/` unanchored would swallow
-# backend/src/parallax/db/models/.
+# Local scratch
 /data/
-/volumes/
-/models/
 *.db
 *.sqlite3
-*.ckpt
-*.safetensors
 
 # Editor / OS
 .vscode/

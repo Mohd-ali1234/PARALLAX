@@ -20,18 +20,15 @@ log = get_logger(__name__)
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncGenerator[None, None]:
     configure_logging()
-    log.info("startup", env=settings.env, version=__version__)
+    log.info("startup", env=settings.env, version=__version__, model=settings.llm_model)
     yield
-    from parallax.db.session import dispose_engine
-
-    await dispose_engine()
     log.info("shutdown")
 
 
 def create_app() -> FastAPI:
     app = FastAPI(
         title=settings.project_name,
-        description="Multimodal Financial Verification Engine",
+        description="Multi-agent customer support desk: supervisor, mobile, computer",
         version=__version__,
         lifespan=lifespan,
         docs_url="/docs" if settings.env != "prod" else None,

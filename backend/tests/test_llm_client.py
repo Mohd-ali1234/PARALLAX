@@ -12,8 +12,8 @@ from typing import Any
 import httpx
 import pytest
 
-from parallax.ai.llm import LLMClient, LLMError
 from parallax.core.exceptions import DependencyUnavailableError
+from parallax.llm.client import LLMClient, LLMError
 
 TOOLS = [
     {

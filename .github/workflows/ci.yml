@@ -13,13 +13,14 @@ concurrency:
 env:
   PYTHON_VERSION: "3.12"
 
+defaults:
+  run:
+    working-directory: backend
+
 jobs:
   lint:
     name: Lint & type-check
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: backend
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -35,29 +36,6 @@ jobs:
   test:
     name: Tests
     runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: pgvector/pgvector:pg16
-        env:
-          POSTGRES_USER: parallax
-          POSTGRES_PASSWORD: parallax
-          POSTGRES_DB: parallax_test
-        ports: ["5432:5432"]
-        options: >-
-          --health-cmd "pg_isready -U parallax"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 12
-    env:
-      PARALLAX_ENV: local
-      PARALLAX_POSTGRES_HOST: localhost
-      PARALLAX_POSTGRES_PORT: "5432"
-      PARALLAX_POSTGRES_USER: parallax
-      PARALLAX_POSTGRES_PASSWORD: parallax
-      PARALLAX_POSTGRES_DB: parallax_test
-    defaults:
-      run:
-        working-directory: backend
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -66,55 +44,6 @@ jobs:
           cache: pip
           cache-dependency-path: backend/pyproject.toml
       - run: pip install -e ".[dev]"
-      - name: Verify migrations apply and reverse
-        run: |
-          alembic upgrade head
-          alembic downgrade base
-          alembic upgrade head
+      # Every LLM call is stubbed, so the suite needs no model server and no
+      # network. If a test ever hangs here, something is reaching out for real.
       - run: pytest --cov=parallax --cov-report=term-missing
-
-  frontend:
-    name: Frontend
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: frontend
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
-      - run: npm ci
-      - run: npm run typecheck
-      - run: npm run lint
-      - run: npm run format:check
-      - run: npm run build
-
-  docker:
-    name: Docker images
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: docker/api/Dockerfile
-          target: runtime
-          push: false
-          load: true
-          tags: parallax-api:ci
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-      - uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: docker/frontend/Dockerfile
-          target: runtime
-          push: false
-          load: true
-          tags: parallax-frontend:ci
-          cache-from: type=gha
-          cache-to: type=gha,mode=max

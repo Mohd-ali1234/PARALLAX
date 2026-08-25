@@ -2,9 +2,8 @@
 
 from fastapi import APIRouter
 
-from parallax.api.v1.routes import agent, documents, health
+from parallax.api.v1.routes import health, support
 
 api_router = APIRouter()
 api_router.include_router(health.router, prefix="/health", tags=["health"])
-api_router.include_router(documents.router, prefix="/documents", tags=["documents"])
-api_router.include_router(agent.router, prefix="/agent", tags=["agent"])
+api_router.include_router(support.router, prefix="/support", tags=["support"])
